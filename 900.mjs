@@ -674,7 +674,7 @@ function mlock_gadgets(gadgets) {
 
     for (const [gadget, addr] of gadgets) {
 
-        const max_gadget_length = 0x50;
+        const max_gadget_length = 0x100;
         chain.push_syscall('mlock', addr, max_gadget_length);
     }
     chain.push_end();
