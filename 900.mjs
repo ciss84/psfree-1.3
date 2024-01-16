@@ -670,11 +670,12 @@ debug_log('Chain900');
 test_rop(Chain);
 
 function mlock_gadgets(gadgets) {
+    mlock = window.syscalls[203];
     const chain = new Chain();
 
     for (const [gadget, addr] of gadgets) {
 
-        const max_gadget_length = 0x100;
+        const max_gadget_length = 0x50;
         chain.push_syscall('mlock', addr, max_gadget_length);
     }
     chain.push_end();
